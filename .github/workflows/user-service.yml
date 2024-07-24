@@ -1,0 +1,126 @@
+name: Deploy User Service
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "users/**"
+
+defaults:
+  run:
+    working-directory: users
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Generate API documentation
+        run: yarn gen:all
+
+      - name: Build the project
+        run: yarn build
+
+      - name: Archive Production Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: ./users/build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the Production Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build
+          path: ./users/build
+
+      - name: Ensure target directory exists
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_IP }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            mkdir -p /home/ubuntu/apps
+            chown ubuntu:ubuntu /home/ubuntu/apps
+
+      - name: Copy files to EC2
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.EC2_IP }}
+          username: ${{ secrets.EC2_USERNAME }} # Update as per your setup
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: "users/build/*"
+          target: "/home/ubuntu/apps/"
+
+      - name: Create .env file
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_IP }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            cat <<EOF > /home/ubuntu/apps/users/build/configs/.env.prod
+            LOG_LEVEL=${{ secrets.LOG_LEVEL }}
+            NODE_ENV=${{ secrets.NODE_ENV}}
+            PORT=${{ secrets.PORT }}
+            MONGODB_URL=${{ secrets.USER_MONGO_URL }}
+            RABBITMQ_ENDPOINT=${{ secrets.RABBITMQ_ENDPOINT }}
+            AUTH_SERVICE_URL=${{ secrets.AUTH_SERVICE_URL }}
+            API_GATEWAY_URL=${{ secrets.API_GATEWAY_URL }}
+            EOF
+
+      
+      - name: Move Package.json to Correct Location
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_IP }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            mv /home/ubuntu/apps/users/build/package.json /home/ubuntu/apps/users/package.json
+
+
+      - name: Start
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_IP }}
+          username: ${{ secrets.EC2_USERNAME }} # Update as per your setup
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            # Load the full user environment for non-interactive shells
+            source /home/ubuntu/.nvm/nvm.sh
+            source /home/ubuntu/.profile
+            
+            cd /home/ubuntu/apps/users
+            echo "Checking directory contents..."
+            ls -alh # Lists all files in the current directory
+            # Install Dependencies
+            yarn install --production
+            # Check if the PM2 process is running
+            if pm2 show users > /dev/null; then
+              echo "Application is running. Restarting..."
+              yarn restart
+            else
+              echo "Application is not running. Starting..."
+              yarn start
+            fi
