@@ -1,4 +1,4 @@
-name: Deploy API Gateways
+name: Deploy  Gateway
 
 on:
   push:
