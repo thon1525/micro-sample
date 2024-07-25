@@ -1,17 +1,14 @@
-name: Deploy  Gateway
+name: CI/CD SCM
 
 on:
   push:
     branches:
       - main
     paths:
-      - "api-gateway/**"
-
-defaults:
-  run:
-    working-directory: api-gateway
+      - "**"
 
 jobs:
+  # create ci for code store in github action in store ubuntu in github
   build:
     runs-on: ubuntu-latest
 
@@ -22,12 +19,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
+      - name: Make envfile
+        uses: SpicyPizza/create-envfile@v1
+        with:
+          file_name: .env
       - name: Install dependencies
         run: yarn install
-
-      - name: Generate API documentation
-        run: yarn gen:all
 
       - name: Build the project
         run: yarn build
@@ -36,38 +33,45 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: build
-          path: ./api-gateway/build
-
+          path: build
+  # create code store
   deploy:
     needs: build
     runs-on: ubuntu-latest
+
     steps:
       - name: Get the Production Artifact
         uses: actions/download-artifact@v2
         with:
           name: build
-          path: ./api-gateway/build
+          path: build
+
+      - name: Add SSH Key
+        uses: webfactory/ssh-agent@v0.5.3
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Ensure target directory exists
         uses: appleboy/ssh-action@master
+        # run: |
+        #   ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_IP }} "mkdir -p /home/ubuntu/app && chown -R ubuntu:ubuntu /home/ubuntu/app"
         with:
           host: ${{ secrets.EC2_IP }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            mkdir -p /home/ubuntu/apps
-            chown ubuntu:ubuntu /home/ubuntu/apps
-
+            mkdir -p /home/ubuntu/app
+            chown -R ubuntu:ubuntu /home/ubuntu/app
       - name: Copy files to EC2
         uses: appleboy/scp-action@master
         with:
           host: ${{ secrets.EC2_IP }}
-          username: ${{ secrets.EC2_USERNAME }} # Update as per your setup
+          username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          source: "api-gateway/build/*"
-          target: "/home/ubuntu/apps/"
+          source: "build/*"
+          target: "/home/ubuntu/app/"
 
       - name: Create .env file
         uses: appleboy/ssh-action@master
@@ -77,20 +81,14 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            cat <<EOF > /home/ubuntu/apps/api-gateway/build/configs/.env.prod
-            NODE_ENV=${{ secrets.NODE_ENV}}
+            cat <<EOF > /home/ubuntu/app/build/configs/.env.staging
+            NODE_ENV=${{ secrets.NODE_ENV }}
             PORT=${{ secrets.PORT }}
-            COOKIE_SECRET_KEY_ONE=${{ secrets.COOKIE_SECRET_KEY_ONE }}
-            COOKIE_SECRET_KEY_TWO=${{ secrets.COOKIE_SECRET_KEY_TWO }}
-            CLIENT_URL=${{ secrets.CLIENT_URL }}
             LOG_LEVEL=${{ secrets.LOG_LEVEL }}
-            RABBITMQ_ENDPOINT=${{ secrets.RABBITMQ_ENDPOINT }}
-            USER_SERVICE_URL=${{ secrets.USER_SERVICE_URL }}
-            AUTH_SERVICE_URL=${{ secrets.AUTH_SERVICE_URL }}
-            TEST=${{ secrets.TEST }}
+            MONGODB_URL=${{ secrets.MONGODB_URL}}
             EOF
 
-      - name: Move Package.json to Correct Location
+      - name: Start Application
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.EC2_IP }}
@@ -98,30 +96,43 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
           script: |
-            mv /home/ubuntu/apps/api-gateway/build/package.json /home/ubuntu/api-gateway/auth/package.json
+            #!/bin/bash
 
-      - name: Start
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.EC2_IP }}
-          username: ${{ secrets.EC2_USERNAME }} # Update as per your setup
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22
-          script: |
-            # Load the full user environment for non-interactive shells
-            source /home/ubuntu/.nvm/nvm.sh
-            source /home/ubuntu/.profile
+            # Check if nvm is installed
+            if [ -s "$HOME/.nvm/nvm.sh" ]; then
+              source "$HOME/.nvm/nvm.sh"
+            elif [ -s "/usr/local/nvm/nvm.sh" ]; then
+              source "/usr/local/nvm/nvm.sh"
+            else
+              echo "nvm is not installed."
+              exit 1
+            fi
 
-            cd /home/ubuntu/apps/api-gateway
+            # Verify yarn installation
+            if ! command -v yarn &> /dev/null; then
+              echo "Yarn could not be found"
+              exit 1
+            fi
+
+            cd /home/ubuntu/app/build
             echo "Checking directory contents..."
             ls -alh # Lists all files in the current directory
+
+            # Check if server.js exists in the correct directory
+            if [ ! -f ./src/server.js ]; then
+              echo "server.js not found in ./src/"
+              exit 1
+            fi
+
             # Install Dependencies
+            echo "Installing dependencies..."
             yarn install
+
             # Check if the PM2 process is running
-            if pm2 show api-gateway > /dev/null; then
+            if pm2 show SCM > /dev/null; then
               echo "Application is running. Restarting..."
-              yarn restart
+              pm2 restart SCM
             else
               echo "Application is not running. Starting..."
-              yarn start
+              pm2 start ./src/server.js --name SCM
             fi
