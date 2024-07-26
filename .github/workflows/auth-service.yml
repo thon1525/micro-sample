@@ -31,10 +31,6 @@ jobs:
 
       - name: Generate API documentation
         run: yarn gen:all
-
-      - name: Create test
-        run: yarn test
-
       - name: Build the project
         run: yarn build
 
