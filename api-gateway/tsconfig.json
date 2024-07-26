@@ -8,6 +8,9 @@
     "module": "commonjs",
     "baseUrl": "./api-gateway",
     "outDir": "./build",
+    "typeRoots": [
+      "node_modules/@types"
+    ],
     "rootDir": ".",
     "strict": true,
     "noImplicitAny": true,

@@ -26,8 +26,14 @@ jobs:
       - name: Install dependencies
         run: yarn install
 
+      - name: Install @types/semver
+        run: yarn add @types/semver --dev
+
       - name: Generate API documentation
         run: yarn gen:all
+
+      - name: Create test
+        run: yarn test
 
       - name: Build the project
         run: yarn build
@@ -79,7 +85,7 @@ jobs:
           script: |
             cat <<EOF > /home/ubuntu/apps/auth/build/configs/.env.prod
             LOG_LEVEL=${{ secrets.LOG_LEVEL }}
-            NODE_ENV=${{ secrets.NODE_ENV}}
+            NODE_ENV=${{ secrets.NODE_ENV }}
             PORT=${{ secrets.PORT }}
             MONGODB_URL=${{ secrets.AUTH_MONGO_URL }}
             RABBITMQ_ENDPOINT=${{ secrets.RABBITMQ_ENDPOINT }}
@@ -127,4 +133,3 @@ jobs:
             else
               echo "Application is not running. Starting..."
               yarn start
-            fi

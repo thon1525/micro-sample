@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
     "module": "commonjs",
+    "typeRoots": ["node_modules/@types", "./typings"],
+    "skipLibCheck": true,
     "esModuleInterop": true,
     "target": "es6", // compile to es6
     "moduleResolution": "node",
