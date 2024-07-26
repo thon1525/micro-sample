@@ -45,3 +45,4 @@ echo "PM2 version:"
 pm2 -v
 echo "Yarn version:"
 yarn -v
+sudo apt-get install dos2unix
